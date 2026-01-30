@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_LIMIT = 12;
 
-function computeKeywordMatches(queryText: string, description: string) {
+function computeKeywordMatches(queryText: string, description: string, title: string) {
   if (!queryText) return [];
   const tokens = queryText
     .toLowerCase()
@@ -15,7 +15,7 @@ function computeKeywordMatches(queryText: string, description: string) {
     .filter(Boolean);
   if (!tokens.length) return [];
   const descriptionTokens = new Set(
-    description
+    `${title} ${description}`
       .toLowerCase()
       .split(/\s+/)
       .map((token) => token.replace(/[^a-z0-9]/g, ""))
@@ -83,6 +83,7 @@ export async function GET(request: NextRequest) {
     const embedding = await embedText(queryText);
     const vectorLiteral = formatVector(embedding);
 
+    const topK = Math.max(limit * 6, 40);
     const rows = await query<{
       id: number;
       name: string;
@@ -96,6 +97,7 @@ export async function GET(request: NextRequest) {
       friend_strength: number;
       recency: number;
       similarity: number;
+      lexical_boost: number;
       event_weight: number;
       score: number;
     }>(
@@ -114,33 +116,57 @@ export async function GET(request: NextRequest) {
           f.strength AS friend_strength,
           CASE WHEN fe.event_type = 'purchase' THEN 1.0 ELSE 0.6 END AS event_weight,
           1 / (1 + EXTRACT(EPOCH FROM (NOW() - fe.event_ts)) / 86400) AS recency,
-          1 - (pe.embedding <=> $1::vector) AS similarity
+          1 - (pe.embedding <=> $1::vector) AS similarity,
+          CASE
+            WHEN p.name ILIKE '%' || $2 || '%' THEN 1.0
+            WHEN p.description ILIKE '%' || $2 || '%' THEN 0.6
+            ELSE 0.0
+          END AS lexical_boost
         FROM friend_events fe
         JOIN friends f ON f.id = fe.friend_id
         JOIN products p ON p.id = fe.product_id
         JOIN product_embeddings pe ON pe.product_id = p.id
-        ${category ? "WHERE p.category = $3" : ""}
+        ${category ? "WHERE p.category = $4" : ""}
+      ),
+      top_similar AS (
+        SELECT *
+        FROM base
+        ORDER BY similarity DESC
+        LIMIT $3
       ),
       scored AS (
         SELECT *,
-          (0.55 * similarity + 0.2 * friend_strength + 0.15 * recency + 0.1 * event_weight) AS score
-        FROM base
+          CASE
+            WHEN MAX(similarity) OVER () = MIN(similarity) OVER () THEN 1
+            ELSE (similarity - MIN(similarity) OVER ()) / NULLIF(MAX(similarity) OVER () - MIN(similarity) OVER (), 0)
+          END AS similarity_norm
+        FROM top_similar
+      ),
+      weighted AS (
+        SELECT *,
+          (
+            0.75 * similarity_norm +
+            0.1 * friend_strength +
+            0.1 * recency +
+            0.05 * lexical_boost
+          ) AS score
+        FROM scored
       ),
       ranked AS (
         SELECT *,
           ROW_NUMBER() OVER (PARTITION BY id ORDER BY score DESC) AS rn
-        FROM scored
+        FROM weighted
       )
       SELECT * FROM ranked
       WHERE rn = 1
       ORDER BY score DESC
       LIMIT $2
       `,
-      category ? [vectorLiteral, limit, category] : [vectorLiteral, limit]
+      category ? [vectorLiteral, queryText, topK, limit, category] : [vectorLiteral, queryText, topK, limit]
     );
 
     const mapped = rows.map((row) => {
-      const keywords = computeKeywordMatches(queryText, row.description);
+      const keywords = computeKeywordMatches(queryText, row.description, row.name);
       return {
         id: row.id,
         name: row.name,

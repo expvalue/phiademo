@@ -272,17 +272,17 @@ export default function Home() {
                         </DialogHeader>
                         <div className="mt-4 space-y-3 text-sm text-slate-600">
                           <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3">
-                            <span>Semantic similarity</span>
+                            <span>Semantic match score</span>
                             <span className="font-semibold text-slate-800">
                               {item.similarity ? item.similarity.toFixed(2) : "—"}
                             </span>
                           </div>
                           <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3">
-                            <span>Friend strength</span>
+                            <span>Friend signal</span>
                             <span className="font-semibold text-slate-800">{item.friendStrength.toFixed(2)}</span>
                           </div>
                           <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3">
-                            <span>Recency boost</span>
+                            <span>Recency contribution</span>
                             <span className="font-semibold text-slate-800">{item.recency.toFixed(2)}</span>
                           </div>
                           <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3">
