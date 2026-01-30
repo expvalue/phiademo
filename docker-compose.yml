@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  db:
+    image: ankane/pgvector:pg16
+    environment:
+      POSTGRES_USER: phiademo
+      POSTGRES_PASSWORD: phiademo
+      POSTGRES_DB: phiademo
+    ports:
+      - "5432:5432"
+    volumes:
+      - phiademo_db:/var/lib/postgresql/data
+
+  web:
+    build: .
+    environment:
+      DATABASE_URL: postgres://phiademo:phiademo@db:5432/phiademo
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+
+volumes:
+  phiademo_db:
