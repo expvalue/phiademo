@@ -53,6 +53,12 @@ When the query is empty, similarity is omitted and the feed prioritizes friend s
 ### 2) Environment variables
 Copy `.env.example` to `.env` and optionally set `OPENAI_API_KEY`.
 
+```bash
+./scripts/create_env.sh
+```
+
+Then open `.env` (in the repo root) and paste your key after `OPENAI_API_KEY=`. Do not paste secrets into `.env.example`.
+
 ### 3) Run the app
 ```bash
 docker compose up --build
