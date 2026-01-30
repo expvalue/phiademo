@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-feature-settings: "ss01" 1, "ss02" 1;
+}
+
+.gradient-hero {
+  background: radial-gradient(circle at top, rgba(99, 102, 241, 0.2), transparent 60%),
+    linear-gradient(120deg, rgba(15, 23, 42, 0.05), rgba(255, 255, 255, 0.9));
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+}
