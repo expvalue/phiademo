@@ -107,43 +107,68 @@ const FALLBACK_RECOMMENDATIONS: Recommendation[] = [
 
 export default function Home() {
   const [query, setQuery] = useState("");
+  const [activeQuery, setActiveQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [items, setItems] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("Recommended for you based on your friends");
+  const [semanticMode, setSemanticMode] = useState<string>("social");
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     const handler = setTimeout(() => {
       const params = new URLSearchParams();
-      if (query) params.set("q", query);
+      if (activeQuery) params.set("q", activeQuery);
       if (activeCategory !== "All") params.set("category", activeCategory);
       params.set("limit", "12");
 
       setLoading(true);
+      setErrorMessage("");
       fetch(`/api/recommendations?${params.toString()}`)
         .then((res) => res.json())
         .then((data) => {
           setItems(data.items ?? []);
+          setSemanticMode(data.mode ?? "social");
           setStatus(
-            query
-              ? `Top matches for “${query}” among your friends' activity`
+            activeQuery
+              ? `Top matches for “${activeQuery}” among your friends' activity`
               : "Recommended for you based on your friends"
           );
         })
         .catch(() => {
-          setItems(FALLBACK_RECOMMENDATIONS);
-          setStatus("Recommended for you based on your friends");
+          if (activeQuery) {
+            setItems([]);
+            setSemanticMode("fallback");
+            setStatus(`No semantic matches found for “${activeQuery}”`);
+            setErrorMessage("Semantic search is unavailable right now.");
+          } else {
+            setItems(FALLBACK_RECOMMENDATIONS);
+            setSemanticMode("social");
+            setStatus("Recommended for you based on your friends");
+          }
         })
         .finally(() => setLoading(false));
     }, 350);
 
     return () => clearTimeout(handler);
-  }, [query, activeCategory]);
+  }, [activeQuery, activeCategory]);
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setActiveQuery(query.trim());
+  };
 
   const friendsHighlight = useMemo(() => {
     const names = Array.from(new Set(items.map((item) => item.friendName))).slice(0, 3);
     return names.join(", ");
   }, [items]);
+
+  const semanticBadgeLabel =
+    semanticMode === "openai"
+      ? "Semantic mode: OpenAI"
+      : semanticMode === "fallback"
+        ? "Semantic mode: Fallback"
+        : "Feed mode: Social";
 
   return (
     <div className="min-h-screen bg-background">
@@ -175,7 +200,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mt-8 flex flex-col gap-4 md:flex-row md:items-center">
+            <form className="mt-8 flex flex-col gap-4 md:flex-row md:items-center" onSubmit={handleSubmit}>
               <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
@@ -185,8 +210,8 @@ export default function Home() {
                   className="pl-11"
                 />
               </div>
-              <Button size="lg">Explore feed</Button>
-            </div>
+              <Button size="lg" type="submit">Explore feed</Button>
+            </form>
 
             <div className="mt-6 flex flex-wrap gap-2">
               {CATEGORY_FILTERS.map((category) => (
@@ -215,8 +240,12 @@ export default function Home() {
               {friendsHighlight ? `Signals from ${friendsHighlight} and more.` : "Listening to your network."}
             </p>
           </div>
-          <Badge variant="accent" className="w-fit">Live semantic ranking</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="accent" className="w-fit">Live semantic ranking</Badge>
+            <Badge variant="outline" className="w-fit">{semanticBadgeLabel}</Badge>
+          </div>
         </div>
+        {errorMessage ? <p className="mt-2 text-sm text-rose-500">{errorMessage}</p> : null}
 
         {loading ? (
           <div className="mt-10 grid gap-6 md:grid-cols-2">

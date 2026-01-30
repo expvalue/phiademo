@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { embedText, formatVector } from "@/lib/embeddings";
+import { cosineSimilarity, deterministicEmbedding, embedText, formatVector } from "@/lib/embeddings";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,24 @@ function computeKeywordMatches(queryText: string, description: string, title: st
       .filter(Boolean)
   );
   return tokens.filter((token) => descriptionTokens.has(token));
+}
+
+function tokenizeQuery(queryText: string) {
+  return queryText
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z0-9]/g, ""))
+    .filter(Boolean);
+}
+
+function lexicalBoost(queryText: string, title: string, description: string) {
+  if (!queryText) return 0;
+  const tokens = tokenizeQuery(queryText);
+  if (!tokens.length) return 0;
+  const haystack = `${title} ${description}`.toLowerCase();
+  if (haystack.includes(queryText.toLowerCase())) return 1;
+  const matched = tokens.some((token) => haystack.includes(token));
+  return matched ? 0.6 : 0;
 }
 
 function diversifyResults(items: Recommendation[]) {
@@ -80,6 +98,106 @@ export async function GET(request: NextRequest) {
   const category = searchParams.get("category")?.trim() ?? "";
 
   if (queryText) {
+    const openAiEnabled = Boolean(process.env.OPENAI_API_KEY);
+    const [{ count: embeddingsCount = 0 } = { count: 0 }] = await query<{ count: number }>(
+      "SELECT COUNT(*)::int AS count FROM product_embeddings"
+    );
+    const semanticMode = openAiEnabled && embeddingsCount > 0 ? "openai" : "fallback";
+
+    if (semanticMode === "fallback") {
+      console.warn("Semantic mode disabled; using deterministic similarity fallback.");
+      const fallbackRows = await query<{
+        id: number;
+        name: string;
+        brand: string;
+        category: string;
+        price: string;
+        description: string;
+        friend_name: string;
+        friend_avatar: string;
+        event_type: "purchase" | "view";
+        friend_strength: number;
+        event_ts: string;
+      }>(
+        `
+        SELECT
+          p.id,
+          p.name,
+          p.brand,
+          p.category,
+          p.price::text,
+          p.description,
+          f.name AS friend_name,
+          f.avatar_url AS friend_avatar,
+          fe.event_type,
+          f.strength AS friend_strength,
+          fe.event_ts
+        FROM friend_events fe
+        JOIN friends f ON f.id = fe.friend_id
+        JOIN products p ON p.id = fe.product_id
+        ${category ? "WHERE p.category = $1" : ""}
+        `,
+        category ? [category] : []
+      );
+
+      const queryEmbedding = deterministicEmbedding(queryText);
+      const now = Date.now();
+      const byProduct = new Map<number, Recommendation>();
+
+      for (const row of fallbackRows) {
+        const productEmbedding = deterministicEmbedding(
+          `${row.name}. ${row.brand}. ${row.category}. ${row.description}`
+        );
+        const similarity = cosineSimilarity(queryEmbedding, productEmbedding);
+        const recency =
+          1 /
+          (1 + (now - new Date(row.event_ts).getTime()) / 1000 / 86400);
+        const eventWeight = row.event_type === "purchase" ? 1 : 0.6;
+        const existing = byProduct.get(row.id);
+
+        const candidate: Recommendation = {
+          id: row.id,
+          name: row.name,
+          brand: row.brand,
+          category: row.category,
+          price: row.price,
+          description: row.description,
+          friendName: row.friend_name,
+          friendAvatar: row.friend_avatar,
+          eventType: row.event_type,
+          similarity,
+          friendStrength: row.friend_strength,
+          recency,
+          eventWeight,
+          score: 0,
+          reason: `Because ${row.friend_name} ${row.event_type === "purchase" ? "bought" : "viewed"} ${row.name}`,
+          keywords: computeKeywordMatches(queryText, row.description, row.name)
+        };
+
+        if (!existing || similarity > (existing.similarity ?? 0)) {
+          byProduct.set(row.id, candidate);
+        }
+      }
+
+      const candidates = Array.from(byProduct.values());
+      const similarities = candidates.map((item) => item.similarity ?? 0);
+      const minSim = similarities.length ? Math.min(...similarities) : 0;
+      const maxSim = similarities.length ? Math.max(...similarities) : 0;
+      const scored = candidates.map((item) => {
+        const similarityNorm = maxSim === minSim ? 1 : ((item.similarity ?? 0) - minSim) / (maxSim - minSim);
+        const boost = lexicalBoost(queryText, item.name, item.description);
+        const score = 0.75 * similarityNorm + 0.1 * item.friendStrength + 0.1 * item.recency + 0.05 * boost;
+        return { ...item, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      return NextResponse.json({
+        query: queryText,
+        mode: semanticMode,
+        items: diversifyResults(scored).slice(0, limit)
+      });
+    }
+
     const embedding = await embedText(queryText);
     const vectorLiteral = formatVector(embedding);
 
@@ -189,6 +307,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       query: queryText,
+      mode: semanticMode,
       items: diversifyResults(mapped).slice(0, limit)
     });
   }
@@ -267,6 +386,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     query: "",
+    mode: "social",
     items: diversifyResults(mapped).slice(0, limit)
   });
 }
