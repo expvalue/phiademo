@@ -1,33 +1,55 @@
-# Deployment Guide
+# Deployment guide
 
-This guide walks through deploying phiademo to hosted services.
+This project ships a Next.js frontend, a FastAPI backend, Postgres for relational data, and Chroma for vector search.
 
-## 1) Database (Supabase + pgvector)
-1. Create a Supabase project.
-2. In the SQL editor, run:
-   ```sql
-   CREATE EXTENSION IF NOT EXISTS vector;
-   ```
-3. Run `db/migrations/001_init.sql` and `db/seed.sql` in Supabase.
-4. Save your connection string as `DATABASE_URL`.
+## 1) Postgres
+Use Supabase (or any hosted Postgres) and create a database.
 
-## 2) Backend / API (Next.js API Routes)
-phiademo uses Next.js API routes (no separate backend).
+Set the connection string as `DB_URL` in your backend environment.
 
-## 3) Frontend (Vercel)
-1. Create a new Vercel project and connect this repository.
-2. Set environment variables:
-   - `DATABASE_URL`
-   - `OPENAI_API_KEY` (optional, for real embeddings)
-   - `OPENAI_EMBEDDING_MODEL` (optional)
-3. Deploy.
+## 2) Chroma
+You can deploy Chroma as a small container service (Render/Fly.io) or keep it alongside the backend.
 
-## 4) Embeddings pipeline
-- Run `python scripts/embed_products.py` locally or in a one-off job with access to the database.
-- For OpenAI embeddings, ensure the API key is set.
-- Without the key, the deterministic fallback embedding keeps the app functional.
+Recommended container:
+```
+chromadb/chroma:latest
+```
 
-## 5) Verification
-- `GET https://<your-domain>/api/health`
-- `GET https://<your-domain>/api/debug/stats`
-- `GET https://<your-domain>/api/recommendations?q=cozy+travel+bag`
+Expose port `8000` and use persistent storage. Set:
+```
+CHROMA_URL=https://<your-chroma-host>
+```
+
+## 3) Backend (FastAPI)
+Deploy `backend/Dockerfile` to Render/Fly.io.
+
+Environment variables:
+- `DB_URL`
+- `CHROMA_URL`
+- `VOYAGE_API_KEY`
+- `VOYAGE_MODEL` (default: `voyage-2`)
+- `CONFIDENCE_DISTANCE_HIGH`
+- `CONFIDENCE_DISTANCE_MED`
+
+On first run, the backend seeds relational data and populates Chroma if empty.
+
+## 4) Frontend (Next.js)
+Deploy the root `Dockerfile` to Vercel.
+
+Environment variables:
+- `NEXT_PUBLIC_API_URL` (e.g. `https://your-backend-url`)
+
+## 5) Verify endpoints
+1. `GET /api/recommendations?q=serum`
+2. `GET /api/debug/vector?q=lamp`
+3. Confirm confidence badges render in the UI.
+
+## Demo mode (easy sharing)
+Set:
+```
+VOYAGE_API_KEY=...
+VOYAGE_MODEL=voyage-2
+CONFIDENCE_DISTANCE_HIGH=0.25
+CONFIDENCE_DISTANCE_MED=0.45
+```
+Use a hosted Chroma instance with persistent storage so results are stable across demos.

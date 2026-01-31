@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   db:
-    image: ankane/pgvector:pg16
+    image: postgres:16
     environment:
       POSTGRES_USER: phiademo
       POSTGRES_PASSWORD: phiademo
@@ -12,16 +12,42 @@ services:
     volumes:
       - phiademo_db:/var/lib/postgresql/data
 
-  web:
+  chroma:
+    image: chromadb/chroma:latest
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      - "8001:8000"
+    volumes:
+      - phiademo_chroma:/chroma/chroma
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DB_URL: postgresql://phiademo:phiademo@db:5432/phiademo
+      CHROMA_URL: http://chroma:8000
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-2}
+      CONFIDENCE_DISTANCE_HIGH: ${CONFIDENCE_DISTANCE_HIGH:-0.25}
+      CONFIDENCE_DISTANCE_MED: ${CONFIDENCE_DISTANCE_MED:-0.45}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - chroma
+
+  frontend:
     build: .
     environment:
-      DATABASE_URL: postgres://phiademo:phiademo@db:5432/phiademo
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_EMBEDDING_MODEL: text-embedding-3-small
+      NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
       - "3000:3000"
     depends_on:
-      - db
+      - backend
 
 volumes:
   phiademo_db:
+  phiademo_chroma:

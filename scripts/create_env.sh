@@ -16,4 +16,4 @@ if [[ ! -f "${EXAMPLE_FILE}" ]]; then
 fi
 
 cp "${EXAMPLE_FILE}" "${ENV_FILE}"
-echo "Created ${ENV_FILE}. Add your OPENAI_API_KEY to that file."
+echo "Created ${ENV_FILE}. Add your VOYAGE_API_KEY to that file."

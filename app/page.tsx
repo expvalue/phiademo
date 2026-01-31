@@ -10,10 +10,29 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const CATEGORY_FILTERS = ["All", "Electronics", "Fashion", "Home", "Beauty", "Travel", "Fitness"];
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+type Match = {
+  friendName: string;
+  eventType: "purchase" | "view";
+  distance: number | null;
+  timestamp: string;
+  productTitle: string;
+};
+
+type Explanation = {
+  summary: string;
+  semanticScore: number | null;
+  friendStrength: number;
+  recencyScore: number;
+  eventWeight: number;
+  lexicalBoost: number;
+  matches: Match[];
+};
 
 type Recommendation = {
   id: number;
-  name: string;
+  title: string;
   brand: string;
   category: string;
   price: string;
@@ -21,89 +40,14 @@ type Recommendation = {
   friendName: string;
   friendAvatar: string;
   eventType: "purchase" | "view";
+  confidence: string;
+  distance: number | null;
   similarity: number | null;
-  friendStrength: number;
-  recency: number;
-  eventWeight: number;
   score: number;
-  reason: string;
-  keywords: string[];
+  explanation: Explanation;
 };
 
-const FALLBACK_RECOMMENDATIONS: Recommendation[] = [
-  {
-    id: 1,
-    name: "Nimbus Noise-Canceling Headphones",
-    brand: "Aurora Audio",
-    category: "Electronics",
-    price: "249.00",
-    description: "Cloud-soft ear cushions with adaptive noise canceling for deep focus.",
-    friendName: "Ava Patel",
-    friendAvatar: "https://i.pravatar.cc/100?img=1",
-    eventType: "purchase",
-    similarity: 0.84,
-    friendStrength: 0.92,
-    recency: 0.88,
-    eventWeight: 1,
-    score: 0.86,
-    reason: "Because Ava Patel bought Nimbus Noise-Canceling Headphones",
-    keywords: ["noise", "focus"]
-  },
-  {
-    id: 2,
-    name: "Atlas Carry-On",
-    brand: "Atlas Travel",
-    category: "Travel",
-    price: "215.00",
-    description: "Expandable carry-on with silent wheels and tech storage.",
-    friendName: "Liam Ortega",
-    friendAvatar: "https://i.pravatar.cc/100?img=4",
-    eventType: "view",
-    similarity: 0.72,
-    friendStrength: 0.64,
-    recency: 0.74,
-    eventWeight: 0.6,
-    score: 0.69,
-    reason: "Because Liam Ortega viewed Atlas Carry-On",
-    keywords: ["carry-on", "travel"]
-  },
-  {
-    id: 3,
-    name: "Eden Skin Serum",
-    brand: "Velvet Labs",
-    category: "Beauty",
-    price: "62.00",
-    description: "Hydrating serum with peptides and niacinamide for glow.",
-    friendName: "Maya Chen",
-    friendAvatar: "https://i.pravatar.cc/100?img=3",
-    eventType: "purchase",
-    similarity: 0.8,
-    friendStrength: 0.88,
-    recency: 0.9,
-    eventWeight: 1,
-    score: 0.83,
-    reason: "Because Maya Chen bought Eden Skin Serum",
-    keywords: ["serum", "glow"]
-  },
-  {
-    id: 4,
-    name: "Lumen Smart Desk Lamp",
-    brand: "Lumen",
-    category: "Home",
-    price: "89.00",
-    description: "Circadian lighting presets with wireless charging base.",
-    friendName: "Sofia Rossi",
-    friendAvatar: "https://i.pravatar.cc/100?img=5",
-    eventType: "view",
-    similarity: 0.67,
-    friendStrength: 0.71,
-    recency: 0.7,
-    eventWeight: 0.6,
-    score: 0.66,
-    reason: "Because Sofia Rossi viewed Lumen Smart Desk Lamp",
-    keywords: ["desk", "lamp"]
-  }
-];
+const eventVerb = (eventType: "purchase" | "view") => (eventType === "purchase" ? "bought" : "viewed");
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -112,7 +56,8 @@ export default function Home() {
   const [items, setItems] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("Recommended for you based on your friends");
-  const [semanticMode, setSemanticMode] = useState<string>("social");
+  const [mode, setMode] = useState("social");
+  const [provider, setProvider] = useState("voyage");
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
@@ -124,28 +69,28 @@ export default function Home() {
 
       setLoading(true);
       setErrorMessage("");
-      fetch(`/api/recommendations?${params.toString()}`)
-        .then((res) => res.json())
+      fetch(`${API_BASE}/api/recommendations?${params.toString()}`)
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error("Failed to fetch recommendations");
+          }
+          return res.json();
+        })
         .then((data) => {
           setItems(data.items ?? []);
-          setSemanticMode(data.mode ?? "social");
+          setMode(data.mode ?? "social");
+          setProvider(data.embeddingProvider ?? "voyage");
           setStatus(
             activeQuery
-              ? `Top matches for “${activeQuery}” among your friends' activity`
+              ? `Top matches for “${activeQuery}” from your friends' activity`
               : "Recommended for you based on your friends"
           );
         })
         .catch(() => {
-          if (activeQuery) {
-            setItems([]);
-            setSemanticMode("fallback");
-            setStatus(`No semantic matches found for “${activeQuery}”`);
-            setErrorMessage("Semantic search is unavailable right now.");
-          } else {
-            setItems(FALLBACK_RECOMMENDATIONS);
-            setSemanticMode("social");
-            setStatus("Recommended for you based on your friends");
-          }
+          setItems([]);
+          setMode(activeQuery ? "semantic" : "social");
+          setStatus(activeQuery ? `No matches for “${activeQuery}”` : "Recommended for you based on your friends");
+          setErrorMessage("Semantic search is unavailable right now.");
         })
         .finally(() => setLoading(false));
     }, 350);
@@ -164,11 +109,9 @@ export default function Home() {
   }, [items]);
 
   const semanticBadgeLabel =
-    semanticMode === "openai"
-      ? "Semantic mode: OpenAI"
-      : semanticMode === "fallback"
-        ? "Semantic mode: Fallback"
-        : "Feed mode: Social";
+    mode === "semantic"
+      ? `Semantic mode: ${provider === "fallback" ? "Fallback" : "Voyage"}`
+      : "Feed mode: Social";
 
   return (
     <div className="min-h-screen bg-background">
@@ -195,149 +138,157 @@ export default function Home() {
               </div>
               <div className="min-w-[280px] rounded-3xl bg-white/80 p-4">
                 <p className="text-xs font-semibold text-slate-500">Signal blend</p>
-                <p className="mt-2 text-sm text-slate-700">Similarity · Friend strength · Recency · Intent</p>
-                <p className="mt-4 text-xs text-slate-400">Powered by pgvector + OpenAI embeddings</p>
+                <p className="mt-2 text-sm text-slate-700">Voyage embeddings · Chroma similarity · Friend recency</p>
+                <p className="mt-4 text-xs text-slate-400">Confidence uses vector distance thresholds</p>
               </div>
             </div>
 
-            <form className="mt-8 flex flex-col gap-4 md:flex-row md:items-center" onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-4 md:flex-row md:items-center">
               <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
+                  className="h-12 rounded-full border border-slate-200 bg-white pl-11 text-sm"
+                  placeholder="What are you looking for?"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search: cozy travel bag, sleek desk setup, glow serum..."
-                  className="pl-11"
                 />
               </div>
-              <Button size="lg" type="submit">Explore feed</Button>
+              <Button type="submit" className="h-12 rounded-full px-8 text-sm font-semibold">
+                Explore feed
+              </Button>
             </form>
 
             <div className="mt-6 flex flex-wrap gap-2">
-              {CATEGORY_FILTERS.map((category) => (
-                <button
-                  key={category}
-                  onClick={() => setActiveCategory(category)}
-                  className={`rounded-full border px-4 py-1 text-xs font-medium transition ${
-                    activeCategory === category
-                      ? "border-primary bg-primary text-white"
-                      : "border-slate-200 bg-white text-slate-600 hover:border-primary/40"
-                  }`}
+              {CATEGORY_FILTERS.map((filter) => (
+                <Button
+                  key={filter}
+                  type="button"
+                  variant={activeCategory === filter ? "default" : "outline"}
+                  size="sm"
+                  className="rounded-full"
+                  onClick={() => setActiveCategory(filter)}
                 >
-                  {category}
-                </button>
+                  {filter}
+                </Button>
               ))}
             </div>
           </div>
         </section>
       </div>
 
-      <main className="mx-auto w-full max-w-6xl px-6 pb-16">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <section className="mx-auto w-full max-w-6xl px-6 pb-16">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h3 className="text-xl font-semibold text-slate-900">{status}</h3>
+            <h3 className="text-lg font-semibold text-slate-900">{status}</h3>
             <p className="text-sm text-slate-500">
-              {friendsHighlight ? `Signals from ${friendsHighlight} and more.` : "Listening to your network."}
+              {friendsHighlight ? `Highlights from ${friendsHighlight}` : "Powered by your friends' activity"}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="accent" className="w-fit">Live semantic ranking</Badge>
-            <Badge variant="outline" className="w-fit">{semanticBadgeLabel}</Badge>
-          </div>
+          <Badge variant="secondary" className="rounded-full px-4 py-2 text-xs">
+            {semanticBadgeLabel}
+          </Badge>
         </div>
-        {errorMessage ? <p className="mt-2 text-sm text-rose-500">{errorMessage}</p> : null}
 
-        {loading ? (
-          <div className="mt-10 grid gap-6 md:grid-cols-2">
-            {[...Array(4)].map((_, index) => (
-              <Card key={`skeleton-${index}`} className="animate-pulse bg-white/70">
-                <CardHeader>
-                  <div className="h-4 w-32 rounded bg-slate-200" />
-                  <div className="mt-3 h-3 w-48 rounded bg-slate-100" />
-                </CardHeader>
-                <CardContent>
-                  <div className="h-16 rounded bg-slate-100" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <div className="mt-8 grid gap-6 md:grid-cols-2">
-            {items.map((item) => (
-              <Card key={item.id} className="flex flex-col justify-between">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <Badge variant="outline">{item.category}</Badge>
-                    <span className="text-sm font-semibold text-slate-900">${item.price}</span>
-                  </div>
-                  <h4 className="mt-4 text-lg font-semibold text-slate-900">{item.name}</h4>
-                  <p className="text-sm text-slate-500">{item.brand}</p>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-slate-600">{item.description}</p>
-                  <div className="mt-5 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Avatar>
-                        <AvatarImage src={item.friendAvatar} alt={item.friendName} />
-                        <AvatarFallback>{item.friendName.slice(0, 2)}</AvatarFallback>
+        {errorMessage ? (
+          <p className="mt-6 text-sm text-rose-500">{errorMessage}</p>
+        ) : null}
+
+        <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {loading
+            ? Array.from({ length: 6 }).map((_, idx) => (
+                <div key={`skeleton-${idx}`} className="h-72 animate-pulse rounded-3xl bg-white/60" />
+              ))
+            : items.map((item) => (
+                <Card key={item.id} className="rounded-3xl border border-slate-100 bg-white shadow-soft">
+                  <CardHeader className="space-y-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-slate-400">{item.category}</p>
+                        <h4 className="text-lg font-semibold text-slate-900">{item.title}</h4>
+                        <p className="text-sm text-slate-500">{item.brand}</p>
+                      </div>
+                      <Badge className="rounded-full bg-slate-900 text-white">{item.confidence}</Badge>
+                    </div>
+                    <p className="text-sm text-slate-600">{item.description}</p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between text-sm text-slate-500">
+                      <span>${item.price}</span>
+                      <span className="text-xs uppercase tracking-[0.2em] text-slate-400">{item.eventType}</span>
+                    </div>
+                    <div className="flex items-center gap-3 rounded-2xl bg-slate-50 px-3 py-2">
+                      <Avatar className="h-9 w-9">
+                        <AvatarImage src={item.friendAvatar} />
+                        <AvatarFallback>{item.friendName[0]}</AvatarFallback>
                       </Avatar>
                       <div>
-                        <p className="text-xs font-semibold text-slate-700">{item.reason}</p>
-                        <p className="text-xs text-slate-400">
-                          {item.eventType === "purchase" ? "Purchased" : "Viewed"} · Strong signal
+                        <p className="text-xs font-semibold text-slate-900">Because {item.friendName}</p>
+                        <p className="text-xs text-slate-500">
+                          {item.friendName} {eventVerb(item.eventType)} {item.title}
                         </p>
                       </div>
                     </div>
+
                     <Dialog>
                       <DialogTrigger asChild>
-                        <Button variant="ghost" size="sm">Why this?</Button>
+                        <Button variant="outline" className="w-full rounded-full text-sm">
+                          Why this?
+                        </Button>
                       </DialogTrigger>
-                      <DialogContent>
+                      <DialogContent className="sm:max-w-lg">
                         <DialogHeader>
-                          <DialogTitle>Why this made the cut</DialogTitle>
-                          <DialogDescription>
-                            We combine semantic similarity with social proof and recency to surface this pick.
-                          </DialogDescription>
+                          <DialogTitle>Why this recommendation?</DialogTitle>
+                          <DialogDescription>{item.explanation.summary}</DialogDescription>
                         </DialogHeader>
-                        <div className="mt-4 space-y-3 text-sm text-slate-600">
-                          <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3">
-                            <span>Semantic match score</span>
-                            <span className="font-semibold text-slate-800">
-                              {item.similarity ? item.similarity.toFixed(2) : "—"}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3">
-                            <span>Friend signal</span>
-                            <span className="font-semibold text-slate-800">{item.friendStrength.toFixed(2)}</span>
-                          </div>
-                          <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3">
-                            <span>Recency contribution</span>
-                            <span className="font-semibold text-slate-800">{item.recency.toFixed(2)}</span>
-                          </div>
-                          <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-3">
-                            <span>Event intent</span>
-                            <span className="font-semibold text-slate-800">{item.eventWeight.toFixed(1)}x</span>
-                          </div>
-                          {item.keywords.length > 0 && (
+                        <div className="space-y-4 text-sm text-slate-600">
+                          <div className="grid grid-cols-2 gap-4">
                             <div>
-                              <p className="text-xs uppercase text-slate-400">Matched keywords</p>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {item.keywords.map((keyword) => (
-                                  <Badge key={keyword}>{keyword}</Badge>
-                                ))}
-                              </div>
+                              <p className="text-xs font-semibold uppercase text-slate-400">Semantic score</p>
+                              <p>{item.explanation.semanticScore ?? "—"}</p>
                             </div>
-                          )}
+                            <div>
+                              <p className="text-xs font-semibold uppercase text-slate-400">Distance</p>
+                              <p>{item.distance?.toFixed(3) ?? "—"}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase text-slate-400">Friend strength</p>
+                              <p>{item.explanation.friendStrength}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase text-slate-400">Recency</p>
+                              <p>{item.explanation.recencyScore}</p>
+                            </div>
+                          </div>
+                          <div className="rounded-2xl bg-slate-50 p-3">
+                            <p className="text-xs font-semibold uppercase text-slate-400">Top friend matches</p>
+                            <ul className="mt-2 space-y-2">
+                              {item.explanation.matches.map((match, idx) => (
+                                <li key={`${item.id}-match-${idx}`} className="flex items-center justify-between">
+                                  <span>
+                                    {match.friendName} {eventVerb(match.eventType)} {match.productTitle}
+                                  </span>
+                                  <span className="text-xs text-slate-500">
+                                    {match.distance !== null ? match.distance.toFixed(3) : "—"}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          <p>
+                            This item ranked highly because its semantic match dominated the score while friend
+                            strength and recency gave it an extra boost.
+                          </p>
                         </div>
                       </DialogContent>
                     </Dialog>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </main>
+                  </CardContent>
+                </Card>
+              ))}
+        </div>
+        {!loading && items.length === 0 ? (
+          <p className="mt-8 text-sm text-slate-500">No recommendations yet. Try a different query or category.</p>
+        ) : null}
+      </section>
     </div>
   );
 }
