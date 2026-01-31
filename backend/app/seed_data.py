@@ -5,7 +5,7 @@ import random
 
 from .db import execute, fetch_all, fetch_one
 from .embeddings import embed_documents
-from .vector_store import get_collection
+from .vector_store import get_chroma_client, get_collection
 
 
 FRIENDS = [
@@ -191,8 +191,11 @@ def rebuild_vector_store() -> None:
     if not events:
         return
 
+    client = get_chroma_client()
+    collections = [c.name for c in client.list_collections()]
+    if "friend_events" in collections:
+        client.delete_collection("friend_events")
     collection = get_collection()
-    collection.delete(where={})
 
     documents = [f"{row['title']} {row['description']}" for row in events]
     embeddings = embed_documents(documents)

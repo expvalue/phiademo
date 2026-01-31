@@ -9,6 +9,8 @@ import voyageai
 
 from .config import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 def _hash_embedding(text: str, dim: int = 256) -> list[float]:
     tokens = [t for t in text.lower().split() if t.strip()]
@@ -26,16 +28,24 @@ def _hash_embedding(text: str, dim: int = 256) -> list[float]:
 def embed_texts(texts: Iterable[str], input_type: str = "document") -> list[list[float]]:
     settings = get_settings()
     if not settings.voyage_api_key:
-        logging.warning("VOYAGE_API_KEY missing; using deterministic fallback embeddings.")
+        logger.warning("VOYAGE_API_KEY missing; using deterministic fallback embeddings.")
         return [_hash_embedding(text) for text in texts]
 
-    client = voyageai.Client(api_key=settings.voyage_api_key)
-    response = client.embed(
-        list(texts),
-        model=settings.voyage_model,
-        input_type=input_type,
-    )
-    return response.embeddings
+    try:
+        client = voyageai.Client(api_key=settings.voyage_api_key)
+        response = client.embed(
+            list(texts),
+            model=settings.voyage_model,
+            input_type=input_type,
+        )
+        return response.embeddings
+    except voyageai.error.RateLimitError as e:
+        logger.warning(
+            "VoyageAI rate limit hit (%s); falling back to hash embeddings. "
+            "Add a payment method at https://dashboard.voyageai.com/ for higher limits.",
+            e,
+        )
+        return [_hash_embedding(text) for text in texts]
 
 
 def embed_query(text: str) -> list[float]:
