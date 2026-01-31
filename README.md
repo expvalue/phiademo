@@ -58,6 +58,11 @@ Copy `.env.example` to `.env` and optionally set `VOYAGE_API_KEY`.
 ./scripts/create_env.sh
 ```
 
+Windows PowerShell alternative:
+```powershell
+Copy-Item .env.example .env
+```
+
 Then open `.env` (in the repo root) and paste your key after `VOYAGE_API_KEY=`. Do not paste secrets into `.env.example`.
 
 ### 3) Run the app
@@ -67,9 +72,12 @@ docker compose up --build
 - The app will run at `http://localhost:3000`
 - The API runs at `http://localhost:8000`
 - Chroma runs at `http://localhost:8001`
-- Data + vectors are auto-seeded on startup
+- Data + vectors are auto-seeded on startup (no manual SQL steps)
 
-### 4) Useful scripts
+### 4) Health check
+Visit `http://localhost:8000/api/health` to confirm Postgres, Chroma, and seeding status.
+
+### 5) Useful scripts
 ```bash
 # Seed relational data
 python scripts/seed_data.py

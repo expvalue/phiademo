@@ -103,6 +103,7 @@ def seed_database() -> None:
     random.seed(42)
     existing_friends = fetch_all("SELECT id FROM friends LIMIT 1")
     if existing_friends:
+        print("Seed data already present. Skipping seeding.")
         return
 
     execute("INSERT INTO users (name) VALUES (%s)", ("You",))
@@ -229,9 +230,11 @@ def ensure_seeded() -> None:
     if row and row["count"] == 0:
         seed_database()
         rebuild_vector_store()
+        print("Seeded DB and populated Chroma.")
 
 
 def ensure_vector_ready() -> None:
     collection = get_collection()
     if collection.count() == 0:
         rebuild_vector_store()
+        print("Chroma was empty. Rebuilt vectors.")

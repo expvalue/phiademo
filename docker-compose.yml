@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:16
@@ -11,6 +9,12 @@ services:
       - "5432:5432"
     volumes:
       - phiademo_db:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phiademo -d phiademo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   chroma:
     image: chromadb/chroma:latest
@@ -21,6 +25,11 @@ services:
       - "8001:8000"
     volumes:
       - phiademo_chroma:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/8000"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build:
@@ -29,6 +38,10 @@ services:
     environment:
       DB_URL: postgresql://phiademo:phiademo@db:5432/phiademo
       CHROMA_URL: http://chroma:8000
+      DB_HOST: db
+      DB_PORT: 5432
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
       VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-2}
       CONFIDENCE_DISTANCE_HIGH: ${CONFIDENCE_DISTANCE_HIGH:-0.25}
@@ -36,8 +49,15 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - db
-      - chroma
+      db:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   frontend:
     build: .
@@ -46,7 +66,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   phiademo_db:

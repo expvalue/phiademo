@@ -87,6 +87,51 @@ def debug_vector(q: str = Query(..., min_length=1)) -> dict[str, Any]:
     }
 
 
+@app.get("/api/health")
+def health() -> dict[str, Any]:
+    db_connected = True
+    tables_present = True
+    seeded = False
+    chroma_connected = True
+    embedding_mode = "voyage" if voyage_enabled() else "fallback"
+
+    try:
+        fetch_one("SELECT 1")
+    except Exception:
+        db_connected = False
+        tables_present = False
+
+    if db_connected:
+        try:
+            table_check = fetch_one(
+                """
+                SELECT COUNT(*) AS count
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_name IN ('friends', 'products', 'friend_events', 'users')
+                """
+            )
+            tables_present = bool(table_check and table_check["count"] == 4)
+            seed_check = fetch_one("SELECT COUNT(*) AS count FROM friends")
+            seeded = bool(seed_check and seed_check["count"] > 0)
+        except Exception:
+            tables_present = False
+
+    try:
+        collection = get_collection()
+        collection.count()
+    except Exception:
+        chroma_connected = False
+
+    return {
+        "db_connected": db_connected,
+        "tables_present": tables_present,
+        "seeded": seeded,
+        "chroma_connected": chroma_connected,
+        "embedding_mode": embedding_mode,
+    }
+
+
 @app.get("/api/recommendations")
 def recommendations(
     q: str | None = None,
